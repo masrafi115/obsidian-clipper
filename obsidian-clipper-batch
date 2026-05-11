@@ -1,0 +1,189 @@
+#!/bin/bash
+
+# obsidian-clipper-batch: Process multiple URLs from clipboard
+# Usage: obsidian-clipper-batch [--template <path>] [--output-dir <dir>] [--vault <name>] [--open]
+
+set -e
+
+# Default values
+TEMPLATE_PATH=""
+OUTPUT_DIR="./clipped-articles"
+VAULT_NAME=""
+OPEN_IN_OBSIDIAN=false
+VERBOSE=true
+
+# Function to print usage
+print_usage() {
+    cat << EOF
+Usage: obsidian-clipper-batch [options]
+
+Options:
+  -t, --template <path>      Path to template JSON file or directory (required)
+  -o, --output-dir <dir>     Output directory for .md files (default: ./clipped-articles)
+  -v, --vault <name>         Obsidian vault name (with --open)
+  --open                     Send to Obsidian instead of writing files
+  --silent                   Suppress output messages
+  -h, --help                 Show this help message
+
+Description:
+  Reads URLs from clipboard (one per line) and generates markdown files
+  using obsidian-clipper for each URL.
+
+Example:
+  obsidian-clipper-batch --template template.json --output-dir ./articles
+
+EOF
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -t|--template)
+            TEMPLATE_PATH="$2"
+            shift 2
+            ;;
+        -o|--output-dir)
+            OUTPUT_DIR="$2"
+            shift 2
+            ;;
+        -v|--vault)
+            VAULT_NAME="$2"
+            shift 2
+            ;;
+        --open)
+            OPEN_IN_OBSIDIAN=true
+            shift
+            ;;
+        --silent)
+            VERBOSE=false
+            shift
+            ;;
+        -h|--help)
+            print_usage
+            exit 0
+            ;;
+        *)
+            echo "Unknown option: $1"
+            print_usage
+            exit 1
+            ;;
+    esac
+done
+
+# Validate template path
+if [ -z "$TEMPLATE_PATH" ]; then
+    echo "Error: --template is required"
+    print_usage
+    exit 1
+fi
+
+# Create output directory if not opening in Obsidian
+if [ "$OPEN_IN_OBSIDIAN" = false ]; then
+    mkdir -p "$OUTPUT_DIR"
+    if [ "$VERBOSE" = true ]; then
+        echo "Output directory: $OUTPUT_DIR"
+    fi
+fi
+
+# Get clipboard content
+if command -v pbpaste &> /dev/null; then
+    # macOS
+    CLIPBOARD=$(pbpaste)
+elif command -v xclip &> /dev/null; then
+    # Linux with xclip
+    CLIPBOARD=$(xclip -selection clipboard -o)
+elif command -v xsel &> /dev/null; then
+    # Linux with xsel
+    CLIPBOARD=$(xsel --clipboard --output)
+elif command -v wl-paste &> /dev/null; then
+    # Wayland
+    CLIPBOARD=$(wl-paste)
+else
+    echo "Error: Could not access clipboard. Please install xclip, xsel, or wl-paste."
+    exit 1
+fi
+
+if [ -z "$CLIPBOARD" ]; then
+    echo "Error: Clipboard is empty"
+    exit 1
+fi
+
+if [ "$VERBOSE" = true ]; then
+    echo "Found URLs in clipboard:"
+    echo "$CLIPBOARD" | grep -E '^https?://' | nl
+    echo ""
+fi
+
+# Process each URL
+PROCESSED=0
+FAILED=0
+SKIPPED=0
+
+while IFS= read -r url; do
+    # Skip empty lines
+    if [ -z "$url" ]; then
+        continue
+    fi
+    
+    # Skip lines that don't look like URLs
+    if ! [[ $url =~ ^https?:// ]]; then
+        if [ "$VERBOSE" = true ]; then
+            echo "⊘ Skipping invalid URL: $url"
+        fi
+        ((SKIPPED++))
+        continue
+    fi
+    
+    if [ "$VERBOSE" = true ]; then
+        echo "📎 Processing: $url"
+    fi
+    
+    # Build clipper command
+    CLI_CMD="node cli.cjs \"$url\" --template \"$TEMPLATE_PATH\""
+    
+    if [ "$OPEN_IN_OBSIDIAN" = true ]; then
+        CLI_CMD="$CLI_CMD --open"
+        if [ -n "$VAULT_NAME" ]; then
+            CLI_CMD="$CLI_CMD --vault \"$VAULT_NAME\""
+        fi
+    else
+        # Generate output filename from URL
+        FILENAME=$(echo "$url" | sed 's|https://||g; s|http://||g; s|/|-|g; s|?.*||g' | cut -c1-50)
+        FILENAME="${FILENAME%%-}.md"
+        OUTPUT_FILE="$OUTPUT_DIR/$FILENAME"
+        CLI_CMD="$CLI_CMD --output \"$OUTPUT_FILE\""
+    fi
+    
+    # Execute clipper command
+    if eval "$CLI_CMD" 2>/dev/null; then
+        if [ "$VERBOSE" = true ]; then
+            if [ "$OPEN_IN_OBSIDIAN" = true ]; then
+                echo "✓ Sent to Obsidian"
+            else
+                echo "✓ Saved to: $OUTPUT_FILE"
+            fi
+        fi
+        ((PROCESSED++))
+    else
+        if [ "$VERBOSE" = true ]; then
+            echo "✗ Failed to process: $url"
+        fi
+        ((FAILED++))
+    fi
+    
+    echo ""
+    
+done <<< "$CLIPBOARD"
+
+# Summary
+echo "═══════════════════════════���═══════════════"
+if [ "$VERBOSE" = true ]; then
+    echo "Summary:"
+    echo "  ✓ Processed: $PROCESSED"
+    echo "  ✗ Failed: $FAILED"
+    echo "  ⊘ Skipped: $SKIPPED"
+    echo ""
+    if [ "$OPEN_IN_OBSIDIAN" = false ]; then
+        echo "Output files saved in: $OUTPUT_DIR"
+    fi
+fi
