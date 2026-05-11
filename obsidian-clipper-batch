@@ -11,6 +11,7 @@ OUTPUT_DIR="./clipped-articles"
 VAULT_NAME=""
 OPEN_IN_OBSIDIAN=false
 VERBOSE=true
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Function to print usage
 print_usage() {
@@ -18,7 +19,8 @@ print_usage() {
 Usage: obsidian-clipper-batch [options]
 
 Options:
-  -t, --template <path>      Path to template JSON file or directory (required)
+  -t, --template <path>      Path to template JSON file or directory
+                             (default: ./template.json or ./templates/)
   -o, --output-dir <dir>     Output directory for .md files (default: ./clipped-articles)
   -v, --vault <name>         Obsidian vault name (with --open)
   --open                     Send to Obsidian instead of writing files
@@ -29,10 +31,45 @@ Description:
   Reads URLs from clipboard (one per line) and generates markdown files
   using obsidian-clipper for each URL.
 
+Default Template Locations (in order):
+  1. ./template.json
+  2. ./templates/ (directory)
+  3. \$HOME/.obsidian-clipper/template.json
+
 Example:
-  obsidian-clipper-batch --template template.json --output-dir ./articles
+  obsidian-clipper-batch --output-dir ./articles
+  obsidian-clipper-batch --template ./my-template.json --open
 
 EOF
+}
+
+# Function to find default template
+find_default_template() {
+    # Check current directory
+    if [ -f "./template.json" ]; then
+        echo "./template.json"
+        return 0
+    fi
+    
+    # Check templates directory
+    if [ -d "./templates" ] && [ -n "$(ls ./templates/*.json 2>/dev/null | head -1)" ]; then
+        echo "./templates"
+        return 0
+    fi
+    
+    # Check home directory
+    if [ -f "$HOME/.obsidian-clipper/template.json" ]; then
+        echo "$HOME/.obsidian-clipper/template.json"
+        return 0
+    fi
+    
+    # Check script directory
+    if [ -f "$SCRIPT_DIR/template.json" ]; then
+        echo "$SCRIPT_DIR/template.json"
+        return 0
+    fi
+    
+    return 1
 }
 
 # Parse arguments
@@ -70,10 +107,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Validate template path
+# Find template if not provided
 if [ -z "$TEMPLATE_PATH" ]; then
-    echo "Error: --template is required"
-    print_usage
+    if TEMPLATE_PATH=$(find_default_template); then
+        if [ "$VERBOSE" = true ]; then
+            echo "📋 Using default template: $TEMPLATE_PATH"
+        fi
+    else
+        echo "Error: No template found. Please specify --template or create one at:"
+        echo "  - ./template.json"
+        echo "  - ./templates/ (directory with .json files)"
+        echo "  - \$HOME/.obsidian-clipper/template.json"
+        echo ""
+        print_usage
+        exit 1
+    fi
+fi
+
+# Validate template path exists
+if [ ! -e "$TEMPLATE_PATH" ]; then
+    echo "Error: Template not found: $TEMPLATE_PATH"
     exit 1
 fi
 
@@ -81,7 +134,7 @@ fi
 if [ "$OPEN_IN_OBSIDIAN" = false ]; then
     mkdir -p "$OUTPUT_DIR"
     if [ "$VERBOSE" = true ]; then
-        echo "Output directory: $OUTPUT_DIR"
+        echo "📁 Output directory: $OUTPUT_DIR"
     fi
 fi
 
@@ -109,7 +162,7 @@ if [ -z "$CLIPBOARD" ]; then
 fi
 
 if [ "$VERBOSE" = true ]; then
-    echo "Found URLs in clipboard:"
+    echo "📋 URLs in clipboard:"
     echo "$CLIPBOARD" | grep -E '^https?://' | nl
     echo ""
 fi
@@ -176,7 +229,7 @@ while IFS= read -r url; do
 done <<< "$CLIPBOARD"
 
 # Summary
-echo "═══════════════════════════���═══════════════"
+echo "════════════════════════════════════════════"
 if [ "$VERBOSE" = true ]; then
     echo "Summary:"
     echo "  ✓ Processed: $PROCESSED"
@@ -184,6 +237,6 @@ if [ "$VERBOSE" = true ]; then
     echo "  ⊘ Skipped: $SKIPPED"
     echo ""
     if [ "$OPEN_IN_OBSIDIAN" = false ]; then
-        echo "Output files saved in: $OUTPUT_DIR"
+        echo "📁 Output files saved in: $OUTPUT_DIR"
     fi
 fi
