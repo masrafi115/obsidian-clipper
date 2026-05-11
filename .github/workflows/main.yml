@@ -34,11 +34,22 @@ jobs:
       - name: Build API
         run: npm run build:api
       
-      - name: Upload CLI artifact
+      - name: Install production dependencies only
+        run: npm ci --production
+      
+      - name: Create standalone package
+        run: |
+          mkdir -p obsidian-clipper-standalone
+          cp dist/cli.cjs obsidian-clipper-standalone/
+          cp -r node_modules obsidian-clipper-standalone/
+          cp package.json obsidian-clipper-standalone/
+          cp package-lock.json obsidian-clipper-standalone/
+      
+      - name: Upload CLI with dependencies
         uses: actions/upload-artifact@v4
         with:
-          name: obsidian-clipper-cli
-          path: dist/cli.cjs
+          name: obsidian-clipper-standalone
+          path: obsidian-clipper-standalone/
           retention-days: 30
       
       - name: Upload API artifact
@@ -69,11 +80,18 @@ jobs:
       - name: Build CLI and API
         run: npm run prepublishOnly
       
-      - name: Download CLI artifact
+      - name: Install production dependencies only
+        run: npm ci --production
+      
+      - name: Download standalone artifact
         uses: actions/download-artifact@v4
         with:
-          name: obsidian-clipper-cli
-          path: dist
+          name: obsidian-clipper-standalone
+          path: obsidian-clipper-standalone
+      
+      - name: Create tarball for standalone CLI
+        run: |
+          tar -czf obsidian-clipper-standalone-linux-x64.tar.gz obsidian-clipper-standalone/
       
       - name: Download API artifact
         uses: actions/download-artifact@v4
@@ -87,6 +105,7 @@ jobs:
           files: |
             dist/cli.cjs
             dist/api.mjs
+            obsidian-clipper-standalone-linux-x64.tar.gz
           draft: false
           prerelease: false
         env:
